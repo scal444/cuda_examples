@@ -3,9 +3,11 @@
 
 #include "capped_distance.h"
 
+using ::testing::ContainerEq;
+using ::testing::DoubleNear;
+using ::testing::Each;
 using ::testing::ElementsAre;
 using ::testing::SizeIs;
-using ::testing::DoubleNear;
 
 // Demonstrate some basic assertions.
 TEST(CappedDistanceTest, EmptyInput) {
@@ -57,4 +59,29 @@ TEST(CappedDistanceTest, CudaMatches) {
     EXPECT_THAT(d.idx1, ElementsAre(0,1, 1));
     EXPECT_THAT(d.idx2, ElementsAre(0,1,2));
     EXPECT_THAT(d.distances, ElementsAre(DoubleNear(0.1, 0.001), DoubleNear(0.1, 0.001), DoubleNear(0.086, 0.001)));
+}
+
+TEST(CappedDistanceTest, LargeScaleCorrect) {
+    DVec d1 = {0.1, 0.2, 0.3};
+    DVec d2 = {0.0, 0.2, 0.4};
+    double want_val = 0.14142135623;
+
+    std::vector<DVec> v1(1000, d1);
+    std::vector<DVec> v2(500, d2);
+
+    Distances d = CappedDistanceCuda(v1, v2, 0.15);
+
+    // Want 0, 0, 0, .... 1, 1, 1,...
+    std::vector<size_t> want_idx1;
+    std::vector<size_t> want_idx2;
+
+    ASSERT_EQ(d.idx1.size(), v1.size() * v2.size());
+    EXPECT_THAT(d.distances, Each(DoubleNear(want_val, 0.001)));
+    for (int i = 0; i < v1.size(); i++) {
+        for (int j = 0; j < v2.size(); j++) {
+            int idx = i * v2.size() + j;
+            ASSERT_EQ(d.idx1[idx], i);
+            ASSERT_EQ(d.idx2[idx], j);
+        }
+    }
 }

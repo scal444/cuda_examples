@@ -17,7 +17,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 __global__ void distanceMatrix(const double* d1, size_t d1_size, const double* d2, size_t d2_size, double* result) {
     size_t d1_idx = threadIdx.x + blockIdx.x * blockDim.x;
-    size_t d2_idx = threadIdx.x + blockIdx.y * blockDim.y;
+    size_t d2_idx = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (d1_idx >= d1_size || d2_idx  >= d2_size) {
         return;
@@ -29,9 +29,8 @@ __global__ void distanceMatrix(const double* d1, size_t d1_size, const double* d
     double dz = d1[3 * d1_idx + 2] - d2[3 * d2_idx + 2];
 
 
-    size_t result_idx = d1_idx * d2_idx;
+    size_t result_idx = d1_idx * d2_size + d2_idx;
     result[result_idx] = sqrt(dx * dx + dy * dy + dz * dz);
-
 }
 
 Distances CappedDistanceCuda(const std::vector<DVec>& d1, const std::vector<DVec>& d2, double cap) {
@@ -56,23 +55,25 @@ Distances CappedDistanceCuda(const std::vector<DVec>& d1, const std::vector<DVec
     checkReturn(cudaMalloc(&d2_dev_ptr, d2_size));
     checkReturn(cudaMalloc(&multiplication_matrix_dev_ptr, multiplication_matrix_size));
 
-    fprintf(stderr, "allocated memory\n");
     checkReturn(cudaMemcpy(d1_dev_ptr, d1_ptr, d1_size, cudaMemcpyHostToDevice));
     checkReturn(cudaMemcpy(d2_dev_ptr, d2_ptr, d2_size, cudaMemcpyHostToDevice));
-    fprintf(stderr, "copied memory\n");
 
+    // debuggy thign, remove
+    cudaMemset(multiplication_matrix_dev_ptr, -2.0, multiplication_matrix_size);
 
 
 
     // Execute kernel
-    constexpr size_t blockDim = 256;
-    const size_t numBlocks_d1 = d1.size() % blockDim == 0 ? d1.size() / blockDim : d1.size() / blockDim + 1;
-    const size_t numBlocks_d2 = d2.size() % blockDim == 0 ? d2.size() / blockDim : d2.size() / blockDim + 1;
-    const dim3 gridDimensions(numBlocks_d1, numBlocks_d2);    distanceMatrix<<<gridDimensions,blockDim>>>(d1_dev_ptr, d1_size, d2_dev_ptr, d2_size, multiplication_matrix_dev_ptr);
+    constexpr size_t blockStride = 16;
+    const size_t numBlocks_d1 = d1.size() % blockStride == 0 ? d1.size() / blockStride : d1.size() / blockStride + 1;
+    const size_t numBlocks_d2 = d2.size() % blockStride == 0 ? d2.size() / blockStride : d2.size() / blockStride + 1;
+    const dim3 gridDimensions(numBlocks_d1, numBlocks_d2);
+    const dim3 blockDimensions(16, 16);
 
 
+    distanceMatrix<<<gridDimensions,blockDimensions>>>(d1_dev_ptr, d1.size(), d2_dev_ptr, d2.size(), multiplication_matrix_dev_ptr);
     // Copy results back over
-    std::vector<double> results(d1.size() * d2.size() * 3);
+    std::vector<double> results(d1.size() * d2.size(), -1);
     checkReturn(cudaMemcpy(results.data(), multiplication_matrix_dev_ptr, multiplication_matrix_size, cudaMemcpyDeviceToHost));
 
     for (size_t i = 0; i < d1.size(); i++) {
